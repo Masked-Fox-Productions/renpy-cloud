@@ -1,0 +1,23 @@
+# Include documentation
+include README.md
+include LICENSE
+include CONTRIBUTING.md
+include DEPLOYMENT.md
+
+# Include configuration files
+include setup.py
+include requirements.txt
+include pytest.ini
+
+# Exclude unnecessary files
+exclude .gitignore
+exclude .coverage
+
+# Exclude directories
+recursive-exclude tests *
+recursive-exclude infra *
+recursive-exclude example_game *
+recursive-exclude htmlcov *
+recursive-exclude .pytest_cache *
+recursive-exclude __pycache__ *
+

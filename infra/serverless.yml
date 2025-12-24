@@ -1,0 +1,181 @@
+service: renpy-cloud
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.11
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  
+  environment:
+    MANIFEST_TABLE: ${self:custom.manifestTable}
+    SAVE_FILES_BUCKET: ${self:custom.saveFilesBucket}
+    COGNITO_USER_POOL_ID: !Ref CognitoUserPool
+    COGNITO_APP_CLIENT_ID: !Ref CognitoUserPoolClient
+  
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:Query
+            - dynamodb:Scan
+          Resource:
+            - !GetAtt ManifestTable.Arn
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+            - s3:ListBucket
+          Resource:
+            - !GetAtt SaveFilesBucket.Arn
+            - !Join ['', [!GetAtt SaveFilesBucket.Arn, '/*']]
+
+custom:
+  manifestTable: ${self:service}-${self:provider.stage}-manifests
+  saveFilesBucket: ${self:service}-${self:provider.stage}-save-files
+
+functions:
+  syncPlan:
+    handler: handlers/sync.plan_handler
+    events:
+      - httpApi:
+          path: /sync/plan
+          method: POST
+          authorizer:
+            type: jwt
+            identitySource: $request.header.Authorization
+            issuerUrl: !GetAtt CognitoUserPool.ProviderURL
+            audience:
+              - !Ref CognitoUserPoolClient
+    timeout: 30
+  
+  syncComplete:
+    handler: handlers/sync.complete_handler
+    events:
+      - httpApi:
+          path: /sync/complete
+          method: POST
+          authorizer:
+            type: jwt
+            identitySource: $request.header.Authorization
+            issuerUrl: !GetAtt CognitoUserPool.ProviderURL
+            audience:
+              - !Ref CognitoUserPoolClient
+    timeout: 15
+
+resources:
+  Resources:
+    # Cognito User Pool
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: ${self:service}-${self:provider.stage}-user-pool
+        UsernameAttributes:
+          - email
+        AutoVerifiedAttributes:
+          - email
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 8
+            RequireUppercase: true
+            RequireLowercase: true
+            RequireNumbers: true
+            RequireSymbols: false
+        Schema:
+          - Name: email
+            Required: true
+            Mutable: false
+    
+    # Cognito User Pool Client
+    CognitoUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: ${self:service}-${self:provider.stage}-client
+        UserPoolId: !Ref CognitoUserPool
+        ExplicitAuthFlows:
+          - ALLOW_USER_PASSWORD_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+        GenerateSecret: false
+        PreventUserExistenceErrors: ENABLED
+    
+    # DynamoDB Table for Manifests
+    ManifestTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.manifestTable}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: user_id
+            AttributeType: S
+          - AttributeName: game_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: user_id
+            KeyType: HASH
+          - AttributeName: game_id
+            KeyType: RANGE
+        TimeToLiveSpecification:
+          Enabled: false
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+    
+    # S3 Bucket for Save Files
+    SaveFilesBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.saveFilesBucket}
+        VersioningConfiguration:
+          Status: Enabled
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        LifecycleConfiguration:
+          Rules:
+            - Id: DeleteOldVersions
+              Status: Enabled
+              NoncurrentVersionExpirationInDays: 90
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins:
+                - '*'
+              AllowedMethods:
+                - GET
+                - PUT
+                - HEAD
+              AllowedHeaders:
+                - '*'
+              MaxAge: 3000
+
+  Outputs:
+    ApiEndpoint:
+      Description: HTTP API endpoint URL
+      Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+    
+    CognitoUserPoolId:
+      Description: Cognito User Pool ID
+      Value: !Ref CognitoUserPool
+    
+    CognitoAppClientId:
+      Description: Cognito App Client ID
+      Value: !Ref CognitoUserPoolClient
+    
+    Region:
+      Description: AWS Region
+      Value: ${self:provider.region}
+    
+    ManifestTableName:
+      Description: DynamoDB Manifest Table Name
+      Value: !Ref ManifestTable
+    
+    SaveFilesBucketName:
+      Description: S3 Save Files Bucket Name
+      Value: !Ref SaveFilesBucket
+

@@ -1,0 +1,15 @@
+{
+  "name": "renpy-cloud-infra",
+  "version": "0.1.0",
+  "description": "AWS infrastructure for renpy-cloud",
+  "scripts": {
+    "deploy": "serverless deploy",
+    "remove": "serverless remove",
+    "info": "serverless info",
+    "logs": "serverless logs -f syncPlan -t"
+  },
+  "devDependencies": {
+    "serverless": "^3.38.0"
+  }
+}
+
